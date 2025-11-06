@@ -1,0 +1,169 @@
+---
+title: "Small shiny of CCLE data"
+title-block-banner: "#1F3963"
+#title-block-banner-color: "#000061"
+description: "Simple dashboard of volcanoplots"
+date: last-modified
+date-format: "YYYY-MM-DD"
+mainfont: Figtree
+sansfont: Georgia
+footnotes-hover: true
+reference-location: margin
+lang: en
+number-sections: false
+crossref:
+  chapters: true
+author:
+  - name: Mattias Vesterlund
+    orcid: 0000-0001-9471-6592
+    email: matves29@kth.se
+    url: https://kth.se
+    affiliations:
+      - name: KTH Library
+        address: Osquars backe 30
+        city: Stockholm
+        postal-code: 100 44
+        url: https://www.kth.se/biblioteket
+highlight-style: pygments
+fig-cap-location: top
+format: 
+  html:
+    grid:
+      sidebar-width: 150px
+      body-width: 1200px
+      margin-width: 0px
+      gutter-width: 1.5em
+editor: visual
+server: shiny
+---
+
+```{r echo = FALSE, message = F, warning = F}
+# Load necessary packages
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(shiny)
+library(shinyWidgets)
+library(scales)
+library(tidyr)
+library(plotly)
+library(ktheme)
+```
+
+```{r load data, echo = FALSE,message = F, warnings = F}
+#| context: data
+#| include: false
+# Function to read and preprocess data
+library(shinyWidgets)
+
+
+#read CCLE gene expression data 
+CCLEmatrix <- as.matrix(read.table("data/CCLEmatrix.txt",header=T, row.names=1, check.names = FALSE, na.strings=c("", "NA", "Inf"), sep="\t"))
+
+#Also some metadata about the observations
+CCLEinfo <- read.table("data/CCLEinfo.txt",header=T, row.names=1, check.names = FALSE, na.strings=c("", "NA", "Inf"), sep="\t")
+
+CCLEinfo$Type<-replace(CCLEinfo$Type, CCLEinfo$Type == "HAEMATOPOIETIC_AND_LYMPHOID_TISSUE", "BLOOD")
+CCLEinfo$Type<-replace(CCLEinfo$Type, CCLEinfo$Type == "CENTRAL_NERVOUS_SYSTEM", "CNS")
+  
+
+
+```
+
+```{r ui, echo = FALSE,message = F, warnings = F}
+library(shinyWidgets)
+
+
+fluidPage(
+  fluidRow(h1("CCLE Dashboard")),
+  
+  fluidRow(
+    column(6,
+        selectInput("CL1_select", "Choose lineage1:", 
+                    choices = c(na.omit(unique(CCLEinfo$Type))),
+                    selected = NA),
+       selectInput("CL2_select", "Choose lineage2:", 
+                    choices = c(na.omit(unique(CCLEinfo$Type))),
+                    selected = NA)
+        ),
+        
+  
+  column(12,
+    tabsetPanel(
+      
+        # Tab for rtype Plot -w stack for publisher
+      tabPanel("Volcano", 
+               plotlyOutput("volcanoplot", width = "100%"))
+      
+    )
+  )
+)
+)
+```
+
+```{r uo, echo = F,message = F, warnings = F}
+#| context: server
+#assumptions
+
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(shiny)
+library(shinyWidgets)
+library(scales)
+library(plotly)
+library(ktheme)
+
+
+
+
+
+
+
+ filtered_data <- reactive({
+   req(input$CL1_select)
+   req(input$CL2_select)
+   Cluster1<-rownames(CCLEinfo[which(CCLEinfo$Type %in% input$CL1_select),])
+   Cluster2<-rownames(CCLEinfo[which(CCLEinfo$Type %in% input$CL2_select),])
+   CL1_vs_CL2_matrix <- CCLEmatrix[,c(Cluster1,Cluster2)]
+   C1vsC2Fold <- rowMeans(CL1_vs_CL2_matrix[,Cluster1])-rowMeans(CL1_vs_CL2_matrix[,Cluster2])
+   #run a t.test by row
+   t.result <- apply(CL1_vs_CL2_matrix, 1, 
+                     function (x) t.test(x[Cluster1],x[Cluster2]))
+   #get the p-values
+   p_values <- unlist(lapply(t.result,
+                             function(x) x$p.value))
+   #correct for multiple testing
+   adj.p_values <- p.adjust(p_values, method = "fdr")
+   #Results Table
+   DE_results <- data.frame(fc=C1vsC2Fold, 
+                                p.value=p_values, 
+                                adj.p.value=adj.p_values,
+                                row.names=rownames(CL1_vs_CL2_matrix), 
+                                genesymbol = rownames(CL1_vs_CL2_matrix))
+   
+   return(DE_results)
+  })
+ 
+vp<- reactive({
+  ggplot(filtered_data(), aes(fc,(-1)*log10(adj.p.value),size=1.5,col=((-1)*log10(adj.p.value)),
+                         text=paste0("Gene:  ",genesymbol)))+ 
+    geom_point()+
+    theme_bw()+
+    labs(y= "-log10(adjusted p-value)", x = "LogFC",legend="-log10(adjusted p-value)")+
+    scale_color_gradientn(name="neglog10 P-value",colours =palette_kth_neo(n=4,type="seq"))+
+    ggtitle("Volcano plot \nFDR corrected ttest on CCLE data") +
+    theme(plot.title = element_text(size = 9))
+  })
+  
+
+  
+## plotly barplot for rtype
+  output$volcanoplot <- renderPlotly({
+    ggplotly(vp(), tooltip = "text")
+  })
+  
+
+```

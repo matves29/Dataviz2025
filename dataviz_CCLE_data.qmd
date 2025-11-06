@@ -1,0 +1,197 @@
+---
+title: "A quick overview of CCLE data"
+title-block-banner: "#000061"
+subtitle: ""
+description: ""
+date: last-modified
+date-format: "YYYY-MM-DD"
+mainfont: Figtree
+sansfont: Georgia
+footnotes-hover: true
+reference-location: margin
+lang: en
+number-sections: false
+crossref:
+  chapters: true
+author:
+  - name: Mattias Vesterlund
+    orcid: 0000-0001-9471-6592
+    email: matves29@kth.se
+    url: https://kth.se
+    affiliations:
+      - name: KTH Library
+        address: Osquars backe 30
+        city: Stockholm
+        postal-code: 100 44
+        url: https://www.kth.se/biblioteket
+highlight-style: pygments
+fig-cap-location: top
+format: 
+  kth-quarto-html: default
+editor: visual
+bibliography: references.bib
+link-citations: true
+csl: IEEE.csl
+---
+
+### Abstract
+
+This is a brief example of a few exploratory plots for comparing expression patterns for genes between a few cell lines from the cancer cell line Encyclopedia (CCLE).
+
+#### A QC plot to check the data
+
+Here is a boxplot of expression levels as an example of a QC-plot.
+
+```{r, warning=F, echo=F,message=F, dev = "png", dev.args=list(bg="transparent")}
+library(ggplot2)
+library(ktheme)
+library(matrixStats)
+library("ggplot2")
+library("reshape2")
+library("gplots")
+library("devtools")
+library("plotly")
+library("wesanderson")
+library("msigdbr")
+library("ggbeeswarm")
+library("ggpubr")
+library("ggridges")
+library("ggExtra")
+library("robustbase")
+library("ggpubr")
+library("survival")
+library("rms")
+library("survminer")
+library("factoextra")
+library("NbClust")
+library("survival")
+library("survminer")
+library("gtsummary")
+library("rms")
+library("tidyr")
+library("reshape2")
+library("gt")
+library(kableExtra)
+select <- dplyr::select
+
+#read CCLE gene expression data 
+CCLEmatrix <- as.matrix(read.table("data/CCLEmatrix.txt",header=T, row.names=1, check.names = FALSE, na.strings=c("", "NA", "Inf"), sep="\t"))
+
+#Also some metadata about the observations
+CCLEinfo <- read.table("data/CCLEinfo.txt",header=T, row.names=1, check.names = FALSE, na.strings=c("", "NA", "Inf"), sep="\t")
+
+CCLEinfo$Type<-replace(CCLEinfo$Type, CCLEinfo$Type == "HAEMATOPOIETIC_AND_LYMPHOID_TISSUE", "BLOOD")
+CCLEinfo$Type<-replace(CCLEinfo$Type, CCLEinfo$Type == "CENTRAL_NERVOUS_SYSTEM", "CNS")
+
+Cluster1<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("BREAST")),])
+
+Cluster2<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("SKIN")),])
+
+Cluster3<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("LUNG_SCLC")),])
+
+Cluster4<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("LUNG_NSCLC")),])
+
+Cluster5<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("BLOOD")),])
+
+Cluster6<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("CNS")),])
+
+testlines<-c(Cluster1[1:7],Cluster6[1:7],Cluster5[1:7],Cluster4[1:7],Cluster3[1:7],Cluster2[1:7])
+
+ccle_melt<-melt(CCLEmatrix[,testlines])
+ccle_melt$type<-CCLEinfo[as.character(ccle_melt$Var2),2]
+
+
+
+ggplot(ccle_melt) + geom_boxplot(aes(y=value,group = Var2 , fill = type )) +
+  scale_color_kth() +
+  scale_fill_kth()+
+  theme_kth_neo() +
+  theme(legend.position = "top",
+        axis.line = element_line(color='black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+
+```
+
+There is quite a bit of variability between different lineages. But overall it looks ok. We can't assume all cell types have the same overall level of expression. To get an overview of how individual cell lines cluster and differ we can run a tSNE analysis to visualize the dataset in two dimensions. 
+
+```{r, warning=F, echo=F,message=F, dev = "png", dev.args=list(bg="transparent")}
+library(Rtsne)
+tsne_out <- Rtsne(t(CCLEmatrix))
+
+tsne_plot <- data.frame(x = tsne_out$Y[,1], 
+                        y = tsne_out$Y[,2])
+tsne_plot$Type<-CCLEinfo$Type
+
+ggplot(tsne_plot, fill=Type) + geom_point(aes(x=x,y=y,color=Type)) +
+  scale_color_kth() +
+  scale_fill_kth()+
+  theme_kth_neo() +
+  theme(legend.position = "top",
+        axis.line = element_line(color='black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+
+```
+
+#### Interactivity as an example of exploration
+
+Here we add an example of how interactivity can be used in data exploration using the CCLE dataset. Here is a comparison of Breast Cancer cell lines and Skin Cancer cell lines. To figure out which genes are the most different we can hover over the data points.
+
+```{r, warning=F, echo=F,message=F, dev = "png", dev.args=list(bg="transparent")}
+
+
+
+Cluster1<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("BREAST")),])
+
+Cluster2<-rownames(CCLEinfo[which(CCLEinfo$Type %in% c("SKIN")),])
+
+
+skin_vs_breast_matrix <- CCLEmatrix[,c(Cluster1,Cluster2)]
+
+#First fold change
+C1vsC2Fold <- rowMeans(skin_vs_breast_matrix[,Cluster1])-rowMeans(skin_vs_breast_matrix[,Cluster2])
+
+#run a t.test by row
+t.result <- apply(skin_vs_breast_matrix, 1, 
+                  function (x) t.test(x[Cluster1],x[Cluster2]))
+
+#get the p-values
+p_values <- unlist(lapply(t.result, 
+                          function(x) x$p.value))
+
+#correct for multiple testing
+adj.p_values <- p.adjust(p_values, method = "fdr")
+
+#Results Table
+SvB_DE_results <- data.frame(fc=C1vsC2Fold, 
+                            p.value=p_values, 
+                            adj.p.value=adj.p_values,
+                            row.names=rownames(skin_vs_breast_matrix), 
+                            genesymbol = rownames(skin_vs_breast_matrix))
+
+#results table sorted by adjusted p-value
+SvB_DE_results_sorted <- SvB_DE_results[order(SvB_DE_results$adj.p.value,
+                                            decreasing=FALSE),]
+
+#here we make a standard ggplot object, but we also add text as an additional aesthetic.
+p<-ggplot(SvB_DE_results, aes(fc,(-1)*log10(adj.p.value),size=1.5,col=((-1)*log10(adj.p.value)),text=paste0("Gene:  ",genesymbol)))+
+  geom_point()+theme_bw()+
+  labs(y= "-log10(adjusted p-value)", x = "LogFC",legend="-log10(adjusted p-value)")+
+  scale_color_gradientn(name="neglog10 P-value",colours =palette_kth_neo(n=4,type="seq"))+
+  ggtitle("Volcano plot \nFDR corrected ttest on CCLE data") +
+  theme(plot.title = element_text(size = 9))
+
+#then we call plotly and tell it to use the text from the aesthetic in the ggobj as a tooltip.
+ggplotly(p,tooltip = "text")
+
+
+
+
+```
